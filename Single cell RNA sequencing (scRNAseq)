@@ -1,0 +1,198 @@
+#Install packages
+install.packages('dplyr')
+install.packages('Seurat')
+install.packages('patchwork')
+install.packages('hdf5r')
+install.packages('devtools')
+devtools::install_github('immunogenomics/presto')
+install.packages('clustree')
+
+
+#Load the packages
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(hdf5r)
+library(devtools)
+library(clustree)
+library(ggplot2)
+
+
+#Load the dataset
+hcaec.data <- Read10X_h5("D:/SynologyDrive/SUN/filtered_feature_bc_matrix.h5")
+
+
+#Initialize the Seurat object with the raw (non-normalized data)
+hcaec <- CreateSeuratObject(counts = hcaec.data, project = "hcaec_sun", min.cells = 3, min.features = 200)
+hcaec
+
+
+#Add a column of sample ids
+sample_id <- read.csv("D:/SynologyDrive/SUN/SampleID.csv")
+hcaec <- AddMetaData(object = hcaec, metadata = sample_id, col.name = 'SampleID')
+
+
+#Add a column of the mitochondrial genome percentage
+hcaec[["percent.mt"]] <- PercentageFeatureSet(hcaec, pattern = "^MT-")
+
+
+#Visualize QC metrics as a violin plot
+VlnPlot(hcaec, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+
+#Visualize QC metrics as a scatter plot
+plot1 <- FeatureScatter(hcaec, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(hcaec, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+
+
+#QC and select cells
+hcaec <- subset(hcaec, subset = nFeature_RNA > 1000 & nFeature_RNA < 8000 & percent.mt < 7)
+
+
+#Normalize the data for each cell by the total expression, multiply this by a scale factor, and log-transform the result
+hcaec <- NormalizeData(hcaec, normalization.method = "LogNormalize", scale.factor = 10000)
+
+
+#Identification of highly variable features (feature selection)
+hcaec <- FindVariableFeatures(hcaec, selection.method = "vst", nfeatures = 2000)
+
+
+#Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(hcaec), 10)
+
+
+#Plot variable features with and without labels
+plot1 <- VariableFeaturePlot(hcaec)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot1 + plot2
+
+
+#Scale (linear transform) the data (mean expression across cells = 0, variance across cells = 1)
+all.genes <- rownames(hcaec)
+hcaec <- ScaleData(hcaec, features = all.genes)
+
+
+#Perform linear dimensional reduction (PCA)
+hcaec <- RunPCA(hcaec, features = VariableFeatures(object = hcaec))
+
+
+#Examine and visualize PCA results a few different ways
+print(hcaec[["pca"]], dims = 1:5, nfeatures = 5)
+VizDimLoadings(hcaec, dims = 1:2, reduction = "pca")
+DimPlot(hcaec, reduction = "pca") + NoLegend()
+
+DimHeatmap(hcaec, dims = 1, cells = 500, balanced = TRUE)
+DimHeatmap(hcaec, dims = 1:15, cells = 500, balanced = TRUE)
+DimHeatmap(hcaec, dims = 15:30, cells = 500, balanced = TRUE)
+
+
+#Determine the 'dimensionality' of the dataset
+ElbowPlot(hcaec, ndims = 30)
+
+
+#Cluster the cells
+hcaec <- FindNeighbors(hcaec, dims = 1:20)
+
+
+#Set the resolution
+hcaec <- FindClusters(hcaec, resolution = c(0.1, 0.2, 0.3, 0.5))
+
+DimPlot(hcaec, group.by = "RNA_snn_res.0.1", label = TRUE)
+DimPlot(hcaec, group.by = "RNA_snn_res.0.2", label = TRUE)
+
+
+#Set identity of clusters
+Idents(hcaec) <- "RNA_snn_res.0.2"
+head(Idents(hcaec), 5)
+
+
+#Run non-linear dimensional reduction (UMAP)
+hcaec <- RunUMAP(hcaec, dims = 1:20)
+DimPlot(hcaec, reduction = "umap", pt.size = 0.5)
+saveRDS(hcaec, file = "D:/SynologyDrive/SUN/hcaec_sun.rds")
+
+DimPlot(hcaec, reduction = "umap", pt.size = 0.5, split.by = "SampleID")
+
+
+#Find differentially expressed features (cluster biomarkers)
+#Find markers for every cluster compared to all remaining cells, report only the positive ones
+hcaec.markers <- FindAllMarkers(hcaec, only.pos = TRUE)
+hcaec.markers %>%
+  group_by(cluster) %>%
+  dplyr::filter(avg_log2FC > 1) %>%
+  print(n = 1500)
+
+cluster1.markers <- FindMarkers(hcaec, ident.1 = 1, logfc.threshold = 0.25, test.use = "roc", only.pos = TRUE)
+cluster1.markers
+cluster2.markers <- FindMarkers(hcaec, ident.1 = 2, logfc.threshold = 0.25, test.use = "roc", only.pos = TRUE)
+cluster2.markers
+cluster3.markers <- FindMarkers(hcaec, ident.1 = 3, logfc.threshold = 0.25, test.use = "roc", only.pos = TRUE)
+cluster3.markers
+cluster4.markers <- FindMarkers(hcaec, ident.1 = 4, logfc.threshold = 0.25, test.use = "roc", only.pos = TRUE)
+cluster4.markers
+cluster5.markers <- FindMarkers(hcaec, ident.1 = 5, logfc.threshold = 0.25, test.use = "roc", only.pos = TRUE)
+cluster5.markers
+
+
+#Visualize marker expression
+VlnPlot(hcaec, features = c("ANKRD33", "FSTL5", "RFPL4AL1", "HES4", "KIF18B", "ASPM", "AUNIP", "PLAC4", "DPYD-AS1", "LINC00705"))
+
+FeaturePlot(hcaec, features = c("MALAT1", "TMSB10", "H2AFZ", "FTX"))
+
+hcaec.markers %>%
+  group_by(cluster) %>%
+  dplyr::filter(avg_log2FC > 1) %>%
+  slice_head(n = 10) %>%
+  ungroup() -> top10
+DoHeatmap(hcaec, features = top10$gene) + NoLegend()
+
+
+#Assign cell type identity to clusters
+new.cluster.ids <- c("1", "2", "3", "4", "5")
+names(new.cluster.ids) <- levels(hcaec)
+hcaec <- RenameIdents(hcaec, new.cluster.ids)
+DimPlot(hcaec, reduction = "umap", label = TRUE, pt.size = 0.5, split.by = "SampleID") + NoLegend()
+
+plot <- DimPlot(hcaec, reduction = "umap", pt.size = 0.5, label = TRUE, label.size = 6, split.by = "SampleID") + xlab("UMAP 1") + ylab("UMAP 2") + theme(axis.title = element_text(size = 18), legend.text = element_text(size = 18)) + guides(colour = guide_legend(override.aes = list(size = 8)))
+plot
+
+ggsave(filename = "D:/SynologyDrive/SUN/hcaec_umap.jpg", height = 7, width = 12, plot = plot, quality = 50)
+                                                                                                                                                                                                           
+saveRDS(hcaec, file = "D:/SynologyDrive/SUN/hcaec_final.rds")
+
+
+#Export the CLOUPE file from Seurat Objects
+install.packages("hdf5r")
+install.packages("remotes")
+install.packages("C:/Users/seony/Downloads/loupeR_Windows.tar.gz", repos = NULL, type ='source')
+remotes::install_github("10xGenomics/loupeR")
+loupeR::setup()
+
+library(loupeR)
+setup()
+y
+
+hcaec <- readRDS("D:/SynologyDrive/SUN/hcaec_final.rds")
+
+clusters <- select_clusters(hcaec)
+projections <- select_projections(hcaec)
+
+Cells(hcaec)
+colnames(hcaec)
+
+Features(hcaec)
+rownames(hcaec)
+
+count_mat <- hcaec@assays[["RNA"]]@layers[["counts"]]
+rownames(count_mat) <- Features(hcaec)
+colnames(count_mat) <- Cells(hcaec)
+
+create_loupe(count_mat = count_mat, clusters = clusters, projections = projections, output_name = "loupe_from_seurat_hcaec_scramble_miR10b-5p_sun")
+
+
+
+
+
+
+

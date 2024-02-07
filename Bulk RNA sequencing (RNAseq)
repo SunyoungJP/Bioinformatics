@@ -1,0 +1,79 @@
+#Installation
+if (!require("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("edgeR")
+
+
+#Loading edgeR
+library(edgeR)
+
+
+#Reading in the data
+rawdata <- read.delim("C:/Users/seony/Documents/Data/Bulk RNAseq/Hdac2 2CA_Co Hippo Striatum/Expression_Profile.mm10.transcript.txt", header = TRUE)
+head(rawdata)
+
+group <- factor(c(2,2,2,1,1,1))
+
+y <- DGEList(counts = rawdata[,11:16], genes = rawdata[, 1:3], group = group)
+rownames(y$counts) <- rownames(y$genes) <- y$genes$Transcript_ID
+y
+
+
+#Filtering and normalization
+keep <- filterByExpr(y)
+table(keep)
+
+hasannot <- rowSums(is.na(y$genes)) == 0
+y <- y[keep & hasannot,,keep.lib.sizes = FALSE ]
+dim(y)
+
+barplot(y$samples$lib.size*1e-6, names = 1:6, ylab = "Library size (millions)")
+
+y$samples$lib.size <- colSums(y$counts)
+
+y <- normLibSizes(y)
+y$samples
+
+#Data exploration
+plotMDS(y)
+
+
+#Design matrix
+design <- model.matrix(~group)
+rownames(design) <- colnames(y)
+design
+
+
+#Dispersion estimation
+y <- estimateDisp(y, design, robust = TRUE)
+y$common.dispersion
+
+plotBCV(y)
+
+
+#Differential expression
+#Quasi-likelihood F-tests
+fit <- glmQLFit(y, design, robust = TRUE)
+plotQLDisp(fit)
+
+qlf <- glmQLFTest(fit, coef = 2)
+
+topTags(qlf)
+summary(decideTests(qlf))
+
+plotMD(qlf)
+abline(h=c(-1,1), col = "blue")
+
+
+#Likelihood ratio tests
+#fit <- glmFit(y, design)
+#lrt <- glmLRT(fit)
+#topTags(lrt)
+#colnames(design)
+#o <- order(lrt$table$PValue)
+#cpm(y)[o[1:10],]
+#summary(decideTests(lrt))
+#plotMD(lrt)
+#abline(h=c(-1,1), col = "blue")
+
